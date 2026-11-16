@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>H-2B / Seafood English Trainer</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --card: #151f32;
+      --card-2: #1e293b;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --green: #10b981;
+      --red: #ef4444;
+      --gold: #f59e0b;
+      --border: #26354d;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0;
+      padding: 0 0 84px 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.45;
+    }
+    .container { max-width: 600px; margin: 0 auto; padding: 14px; }
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      background: var(--card); border: 1px solid var(--border);
+      padding: 12px 14px; border-radius: 14px; margin-bottom: 14px;
+    }
+    .badge {
+      display: inline-block; padding: 4px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 700; background: rgba(59,130,246,0.2); color: #60a5fa;
+    }
+    .badge.gold { background: rgba(245,158,11,0.2); color: #fbbf24; }
+    .badge.green { background: rgba(16,185,129,0.2); color: #34d399; }
+
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 16px; padding: 16px; margin-bottom: 12px;
+    }
+    h1, h2, h3 { margin: 0 0 8px 0; }
+    h2 { font-size: 18px; }
+    h3 { font-size: 15px; color: #e2e8f0; }
+    p { margin: 0 0 10px 0; color: var(--muted); font-size: 14px; }
+
+    .btn {
+      width: 100%; padding: 13px 16px; border: none; border-radius: 12px;
+      background: var(--accent); color: #fff; font-size: 15px; font-weight: 600;
+      cursor: pointer; transition: 0.15s; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: var(--card-2); color: var(--text); border: 1px solid var(--border); }
+    .btn-green { background: var(--green); color: #042f2e; }
+    .btn-red { background: var(--red); color: #fff; }
+    .btn-sm { padding: 8px 12px; font-size: 13px; width: auto; border-radius: 10px; }
+
+    /* Tap-to-translate tokens */
+    .dialogue-line {
+      background: var(--card-2); border-radius: 12px; padding: 12px; margin-bottom: 10px;
+      border-left: 3px solid var(--accent);
+    }
+    .dialogue-line.you { border-left-color: var(--green); }
+    .speaker-row {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px;
+    }
+    .word-token {
+      display: inline-block; padding: 3px 6px; margin: 2px 1px;
+      background: rgba(255,255,255,0.06); border-radius: 7px;
+      font-size: 16px; color: #fff; cursor: pointer;
+      border-bottom: 1px dashed rgba(96,165,250,0.6);
+    }
+    .word-token.active { background: var(--accent); color: #fff; border-bottom-color: transparent; }
+
+    /* Floating translation popup */
+    #translation-bar {
+      position: fixed; bottom: 72px; left: 12px; right: 12px; max-width: 576px; margin: 0 auto;
+      background: #1e293b; border: 1px solid var(--accent); border-radius: 14px;
+      padding: 12px 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      display: none; justify-content: space-between; align-items: center; z-index: 50;
+    }
+
+    /* Sentence Builder */
+    .tile-pool, .tile-answer {
+      display: flex; flex-wrap: wrap; gap: 6px; min-height: 46px;
+      padding: 10px; border-radius: 12px; background: var(--bg); border: 1px dashed var(--border);
+      margin-bottom: 10px;
+    }
+    .tile-answer { border-style: solid; border-color: var(--accent); }
+    .word-tile {
+      padding: 7px 11px; background: var(--card-2); border: 1px solid var(--border);
+      border-radius: 9px; font-size: 14px; color: #fff; cursor: pointer;
+    }
+
+    /* Voice recorder box */
+    .rec-box {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+      padding: 12px; margin-top: 10px;
+    }
+    .rec-status { font-size: 13px; color: var(--gold); margin-bottom: 8px; font-weight: 600; }
+    textarea, input[type="text"] {
+      width: 100%; background: var(--card-2); border: 1px solid var(--border);
+      color: #fff; border-radius: 10px; padding: 10px; font-size: 14px; margin-top: 8px;
+    }
+
+    /* Bottom Nav */
+    .nav {
+      position: fixed; bottom: 0; left: 0; right: 0; height: 64px;
+      background: #0f172a; border-top: 1px solid var(--border);
+      display: flex; justify-content: space-around; align-items: center; z-index: 40;
+    }
+    .nav-item {
+      flex: 1; text-align: center; color: var(--muted); font-size: 11px; font-weight: 600;
+      padding: 8px 4px; cursor: pointer;
+    }
+    .nav-item.active { color: #60a5fa; }
+    .nav-icon { font-size: 19px; display: block; margin-bottom: 2px; }
+
+    .option-btn {
+      width: 100%; text-align: left; padding: 11px 12px; margin-bottom: 8px;
+      background: var(--card-2); border: 1px solid var(--border); border-radius: 10px;
+      color: var(--text); font-size: 14px; cursor: pointer;
+    }
+    .option-btn.selected { border-color: var(--accent); background: rgba(59,130,246,0.18); }
+
+    .hidden { display: none !important; }
+    .loader { text-align: center; padding: 40px 20px; color: var(--muted); }
+    .score-big { font-size: 34px; font-weight: 800; color: var(--gold); text-align: center; margin: 8px 0; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div id="loading-screen" class="loader">Загрузка тренажера H-2B...</div>
+
+  <!-- Top User Bar -->
+  <div id="top-bar" class="header hidden">
+    <div>
+      <div style="font-weight:700; font-size:15px;" id="user-name">Кандидат</div>
+      <div style="font-size:12px; color:var(--muted);">Рекорд: <strong style="color:var(--gold)" id="user-best-score">0</strong> / 10 000</div>
+    </div>
+    <span class="badge" id="user-level-badge">Audition</span>
+  </div>
+
+  <!-- SCREEN 1: MANDATORY AUDITION -->
+  <div id="screen-audition" class="hidden">
+    <div class="card">
+      <span class="badge gold">Шаг 1 · Обязательный отбор</span>
+      <h2 style="margin-top:6px;">Входной Audition (Проверка уровня и дикции)</h2>
+      <p>Пройди короткий тест, чтобы система определила твой грейд (Novice / Worker / Pro) и открыла доступ к курсу и собеседованию.</p>
+    </div>
+
+    <div id="audition-questions-box"></div>
+
+    <div class="card">
+      <h3>4. Голосовая визитка (Дикция и речь)</h3>
+      <p>Скажи вслух на английском (2–3 предложения): <strong>как тебя зовут, сколько тебе лет и почему ты хочешь поехать работать в США в этом сезоне.</strong></p>
+      <div class="rec-box">
+        <div class="rec-status" id="aud-rec-status">Микрофон готов (можно также дописать текстом ниже)</div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-red btn-sm" id="aud-rec-btn" onclick="toggleRecord('aud')">🎙️ Записать голос</button>
+          <button class="btn btn-secondary btn-sm hidden" id="aud-clear-btn" onclick="clearAudio('aud')">Удалить запись</button>
+        </div>
+        <input type="text" id="aud-text-fallback" placeholder="Или напишите ответ на английском здесь..." />
+      </div>
+    </div>
+
+    <button class="btn btn-green" id="aud-submit-btn" onclick="submitAudition()">Завершить Audition и открыть курс</button>
+  </div>
+
+  <!-- SCREEN 2: MODULES LIST -->
+  <div id="screen-courses" class="hidden">
+    <div class="card" style="background: linear-gradient(135deg, #172554, #1e293b);">
+      <h3>✨ Бесконечная AI-практика под твой уровень</h3>
+      <p>Хочешь отработать конкретную ситуацию (ночная смена, поломка станка, разговор с соседом)? Сгенерируй новый урок за 5 секунд.</p>
+      <input type="text" id="ai-topic-input" placeholder="Например: Разговор с супервайзером про больную спину" />
+      <button class="btn btn-sm" style="margin-top:8px; width:100%;" id="gen-lesson-btn" onclick="generateCustomLesson()">Сгенерировать AI-урок</button>
+    </div>
+
+    <div id="modules-list"></div>
+  </div>
+
+  <!-- SCREEN 3: ACTIVE LESSON -->
+  <div id="screen-lesson" class="hidden">
+    <button class="btn btn-secondary btn-sm" style="margin-bottom:10px;" onclick="showTab('courses')">← Назад к модулям</button>
+    <div class="card">
+      <span class="badge" id="lesson-tag">Module</span>
+      <h2 style="margin-top:6px;" id="lesson-title">Название урока</h2>
+      <p id="lesson-desc">Описание</p>
+      <div style="font-size:12px; color:#60a5fa; background:rgba(59,130,246,0.1); padding:8px; border-radius:8px;">
+        💡 <strong>Фишка:</strong> Нажми на любое английское слово в диалоге ниже, чтобы мгновенно увидеть перевод!
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>1. Разбор диалога (Tap-to-Translate)</h3>
+      <div id="lesson-dialogue"></div>
+    </div>
+
+    <div class="card">
+      <h3>2. Сборка предложения</h3>
+      <p id="builder-ru-prompt" style="color:#fff; font-weight:600;"></p>
+      <div class="tile-answer" id="builder-answer-box"></div>
+      <div class="tile-pool" id="builder-pool-box"></div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-secondary btn-sm" onclick="resetBuilder()">Сбросить</button>
+        <button class="btn btn-sm" onclick="checkBuilder()">Проверить сборку</button>
+      </div>
+      <div id="builder-feedback" style="margin-top:8px; font-size:13px; font-weight:600;"></div>
+    </div>
+
+    <div class="card">
+      <h3>3. Тренировка дикции и произношения</h3>
+      <p>Прочитай фразу вслух, чтобы ИИ проверил произношение:</p>
+      <div style="background:var(--bg); padding:10px; border-radius:10px; font-weight:600; color:#93c5fd; margin-bottom:8px;" id="speaking-target"></div>
+      <button class="btn btn-secondary btn-sm" onclick="speakText(document.getElementById('speaking-target').innerText)">🔊 Послушать эталон</button>
+      <div class="rec-box">
+        <div class="rec-status" id="les-rec-status">Нажмите «Записать», чтобы проверить дикцию</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-red btn-sm" id="les-rec-btn" onclick="toggleRecord('les')">🎙️ Записать</button>
+          <button class="btn btn-sm" id="les-check-btn" onclick="submitPronunciation()">Проверить речь</button>
+        </div>
+        <input type="text" id="les-text-fallback" placeholder="Или введите фразу текстом, если без микрофона..." />
+        <div id="les-pronunciation-result" style="margin-top:10px; font-size:13px;"></div>
+      </div>
+    </div>
+
+    <button class="btn btn-green" onclick="finishCurrentLesson()">✅ Завершить урок и получить прогресс</button>
+  </div>
+
+  <!-- SCREEN 4: INTERVIEW 3 + 3 (10,000 PTS) -->
+  <div id="screen-interview" class="hidden">
+    <div id="interview-intro" class="card">
+      <span class="badge gold">Финальный экзамен · До 10 000 баллов</span>
+      <h2 style="margin-top:6px;">Собеседование 3 + 3 (Посольство + Рыбзавод)</h2>
+      <p>Тебя ждут <strong>6 реальных вопросов</strong>:</p>
+      <ul style="color:var(--muted); font-size:14px; padding-left:18px; margin:8px 0;">
+        <li><strong>3 вопроса от Консула США</strong> (цель поездки, связи с родиной, финансы)</li>
+        <li><strong>3 вопроса от Супервайзера рыбзавода</strong> (выносливость 12–16 ч, техника безопасности, работа в команде)</li>
+      </ul>
+      <p>Отвечай <strong>голосом</strong> (для максимальных 10 000 баллов с оценкой дикции) или текстом. Можно проходить сколько угодно раз — в рейтинг идет твой лучший рекорд.</p>
+      <button class="btn btn-green" onclick="startInterview()">Начать собеседование</button>
+    </div>
+
+    <div id="interview-active" class="card hidden">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span class="badge" id="int-role-badge">Consular Officer</span>
+        <span style="font-size:13px; color:var(--muted);" id="int-progress">Вопрос 1 из 6</span>
+      </div>
+      <h2 id="int-question-text" style="font-size:17px; margin-bottom:10px;"></h2>
+      <button class="btn btn-secondary btn-sm" onclick="speakText(document.getElementById('int-question-text').innerText)">🔊 Озвучить вопрос офицера</button>
+      <div style="font-size:12px; color:var(--gold); margin-top:10px;" id="int-hint-ru"></div>
+
+      <div class="rec-box">
+        <div class="rec-status" id="int-rec-status">Запишите голосовой ответ на английском</div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-red btn-sm" id="int-rec-btn" onclick="toggleRecord('int')">🎙️ Записать ответ</button>
+          <button class="btn btn-secondary btn-sm hidden" id="int-clear-btn" onclick="clearAudio('int')">Перезаписать</button>
+        </div>
+        <input type="text" id="int-text-input" placeholder="Или напишите ответ на английском..." />
+      </div>
+
+      <button class="btn" style="margin-top:12px;" id="int-next-btn" onclick="nextInterviewStep()">Следующий вопрос →</button>
+    </div>
+
+    <div id="interview-result" class="hidden"></div>
+  </div>
+
+  <!-- SCREEN 5: LEADERBOARD -->
+  <div id="screen-rating" class="hidden">
+    <div class="card">
+      <h2>🏆 Рейтинг компании (Шкала 10 000)</h2>
+      <p>Сравнение результатов собеседования на визу H-2B и работу в США.</p>
+      <div id="leaderboard-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Floating Word Translation Tooltip -->
+<div id="translation-bar">
+  <div>
+    <div style="font-size:12px; color:#94a3b8;" id="tr-en-word">word</div>
+    <div style="font-size:16px; font-weight:700; color:#fff;" id="tr-ru-word">перевод</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn btn-secondary btn-sm" onclick="speakText(document.getElementById('tr-en-word').innerText)">🔊</button>
+    <button class="btn btn-secondary btn-sm" onclick="closeTranslation()">✕</button>
+  </div>
+</div>
+
+<!-- Bottom Navigation -->
+<div class="nav hidden" id="bottom-nav">
+  <div class="nav-item active" id="nav-courses" onclick="showTab('courses')">
+    <span class="nav-icon">📚</span>Курс H-2B
+  </div>
+  <div class="nav-item" id="nav-interview" onclick="showTab('interview')">
+    <span class="nav-icon">🎙️</span>Интервью 3+3
+  </div>
+  <div class="nav-item" id="nav-rating" onclick="showTab('rating')">
+    <span class="nav-icon">🏆</span>Рейтинг
+  </div>
+</div>
+
+<script>
+  const tg = window.Telegram?.WebApp;
+  if (tg) {
+    tg.ready();
+    tg.expand();
+  }
+  const initData = tg?.initData || "";
+
+  let state = {
+    user: null,
+    auditionQuestions: [],
+    modules: [],
+    interviewQuestions: [],
+    leaderboard: [],
+    audChoices: {},
+    audBuilderWords: [],
+    currentLesson: null,
+    lessonBuilderSelected: [],
+    lessonBuilderPool: [],
+    interviewIdx: 0,
+    interviewAnswers: {}, // { qid: { text: "", blob: Blob|null } }
+    recorders: {},
+    audioBlobs: {}
+  };
+
+  async function apiFetch(url, options = {}) {
+    options.headers = {
+      ...(options.headers || {}),
+      "X-Telegram-Init-Data": initData
+    };
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Ошибка сервера" }));
+      throw new Error(err.detail || "Ошибка запроса");
+    }
+    return res.json();
+  }
+
+  function speakText(text) {
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = "en-US";
+    utter.rate = 0.92;
+    window.speechSynthesis.speak(utter);
+  }
+
+  // --- Audio Recording ---
+  async function toggleRecord(slot) {
+    if (state.recorders[slot] && state.recorders[slot].state === "recording") {
+      state.recorders[slot].stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      const chunks = [];
+      mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      mr.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
+        state.audioBlobs[slot] = blob;
+        document.getElementById(`${slot}-rec-status`).innerText = "✅ Голос записан (" + Math.round(blob.size / 1024) + " КБ)";
+        const btn = document.getElementById(`${slot}-rec-btn`);
+        btn.innerText = "🎙️ Перезаписать";
+        btn.classList.remove("btn-green");
+        btn.classList.add("btn-red");
+        const clr = document.getElementById(`${slot}-clear-btn`);
+        if (clr) clr.classList.remove("hidden");
+      };
+      state.recorders[slot] = mr;
+      mr.start();
+      document.getElementById(`${slot}-rec-status`).innerText = "🔴 Идет запись... Говорите по-английски!";
+      const btn = document.getElementById(`${slot}-rec-btn`);
+      btn.innerText = "⏹️ Остановить запись";
+      btn.classList.remove("btn-red");
+      btn.classList.add("btn-green");
+    } catch (e) {
+      alert("Не удалось получить доступ к микрофону. Вы можете ввести ответ текстом.");
+    }
+  }
+
+  function clearAudio(slot) {
+    state.audioBlobs[slot] = null;
+    document.getElementById(`${slot}-rec-status`).innerText = "Запись удалена";
+    const clr = document.getElementById(`${slot}-clear-btn`);
+    if (clr) clr.classList.add("hidden");
+  }
+
+  // --- Bootstrap ---
+  async function initApp() {
+    try {
+      const data = await apiFetch("/api/bootstrap");
+      state.user = data.user;
+      state.auditionQuestions = data.audition_questions;
+      state.modules = data.modules;
+      state.interviewQuestions = data.interview_questions;
+      state.leaderboard = data.leaderboard;
+
+      document.getElementById("loading-screen").classList.add("hidden");
+      updateTopBar();
+
+      if (!state.user.level) {
+        renderAudition();
+        document.getElementById("screen-audition").classList.remove("hidden");
+      } else {
+        document.getElementById("bottom-nav").classList.remove("hidden");
+        renderModules();
+        renderLeaderboard();
+        showTab("courses");
+      }
+    } catch (e) {
+      document.getElementById("loading-screen").innerText = "Ошибка запуска: " + e.message;
+    }
+  }
+
+  function updateTopBar() {
+    document.getElementById("top-bar").classList.remove("hidden");
+    document.getElementById("user-name").innerText = state.user.full_name;
+    document.getElementById("user-best-score").innerText = state.user.best_interview_score;
+    const badge = document.getElementById("user-level-badge");
+    badge.innerText = state.user.level ? `Уровень: ${state.user.level}` : "Audition";
+    if (state.user.level === "Pro") badge.className = "badge gold";
+    else if (state.user.level === "Worker") badge.className = "badge green";
+  }
+
+  function showTab(tab) {
+    closeTranslation();
+    ["courses", "lesson", "interview", "rating"].forEach(s => {
+      document.getElementById(`screen-${s}`).classList.add("hidden");
+    });
+    ["courses", "interview", "rating"].forEach(n => {
+      document.getElementById(`nav-${n}`).classList.remove("active");
+    });
+    document.getElementById(`screen-${tab}`).classList.remove("hidden");
+    const navEl = document.getElementById(`nav-${tab === "lesson" ? "courses" : tab}`);
+    if (navEl) navEl.classList.add("active");
+  }
+
+  // --- AUDITION ---
+  function renderAudition() {
+    const box = document.getElementById("audition-questions-box");
+    box.innerHTML = "";
+    state.auditionQuestions.forEach((q, idx) => {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `<h3>${idx + 1}. ${q.prompt}</h3>`;
+      if (q.type === "choice") {
+        q.options.forEach((opt, oIdx) => {
+          const btn = document.createElement("button");
+          btn.className = "option-btn";
+          btn.innerText = opt;
+          btn.onclick = () => {
+            state.audChoices[q.id] = oIdx;
+            card.querySelectorAll(".option-btn").forEach(b => b.classList.remove("selected"));
+            btn.classList.add("selected");
+          };
+          card.appendChild(btn);
+        });
+      } else if (q.type === "builder") {
+        const ansDiv = document.createElement("div");
+        ansDiv.className = "tile-answer";
+        const poolDiv = document.createElement("div");
+        poolDiv.className = "tile-pool";
+        const shuffled = [...q.words].sort(() => Math.random() - 0.5);
+
+        const redraw = () => {
+          ansDiv.innerHTML = "";
+          state.audBuilderWords.forEach((w, i) => {
+            const t = document.createElement("span");
+            t.className = "word-tile";
+            t.innerText = w;
+            t.onclick = () => {
+              state.audBuilderWords.splice(i, 1);
+              shuffled.push(w);
+              redraw();
+            };
+            ansDiv.appendChild(t);
+          });
+          poolDiv.innerHTML = "";
+          shuffled.forEach((w, i) => {
+            const t = document.createElement("span");
+            t.className = "word-tile";
+            t.innerText = w;
+            t.onclick = () => {
+              shuffled.splice(i, 1);
+              state.audBuilderWords.push(w);
+              redraw();
+            };
+            poolDiv.appendChild(t);
+          });
+        };
+        redraw();
+        card.appendChild(ansDiv);
+        card.appendChild(poolDiv);
+      }
+      box.appendChild(card);
+    });
+  }
+
+  async function submitAudition() {
+    let score = 0;
+    state.auditionQuestions.forEach(q => {
+      if (q.type === "choice" && state.audChoices[q.id] === q.correct_index) score++;
+      if (q.type === "builder" && state.audBuilderWords.join(" ") === q.answer) score++;
+    });
+
+    const textAns = document.getElementById("aud-text-fallback").value.trim();
+    const audioBlob = state.audioBlobs["aud"];
+    if (!audioBlob && !textAns) {
+      alert("Запишите короткое голосовое или напишите 1–2 предложения о себе в пункте 4.");
+      return;
+    }
+
+    const btn = document.getElementById("aud-submit-btn");
+    btn.disabled = true;
+    btn.innerText = "ИИ анализирует уровень и дикцию...";
+
+    try {
+      const fd = new FormData();
+      fd.append("quiz_score", String(score));
+      fd.append("text_answer", textAns);
+      if (audioBlob) fd.append("audio", audioBlob, "audition.webm");
+
+      const data = await apiFetch("/api/audition", { method: "POST", body: fd });
+      state.user = data.user;
+      alert(`Audition пройден!\nТвой уровень: ${data.result.level}\n\n${data.result.feedback}`);
+
+      document.getElementById("screen-audition").classList.add("hidden");
+      document.getElementById("bottom-nav").classList.remove("hidden");
+      updateTopBar();
+      renderModules();
+      renderLeaderboard();
+      showTab("courses");
+    } catch (e) {
+      alert("Ошибка: " + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerText = "Завершить Audition и открыть курс";
+    }
+  }
+
+  // --- COURSES & TAP-TO-TRANSLATE ---
+  function renderModules() {
+    const list = document.getElementById("modules-list");
+    list.innerHTML = "";
+    const completed = new Set(state.user.lessons_completed || []);
+
+    state.modules.forEach(mod => {
+      const isDone = completed.has(mod.id);
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span class="badge ${isDone ? 'green' : ''}">${mod.tag}</span>
+          <span style="font-size:12px; color:${isDone ? '#34d399' : '#94a3b8'};">${isDone ? '✅ Пройдено' : 'Открыто'}</span>
+        </div>
+        <h2>${mod.title}</h2>
+        <p>${mod.description}</p>
+        <button class="btn btn-sm" style="width:100%;">Открыть урок</button>
+      `;
+      card.querySelector("button").onclick = () => openLesson(mod);
+      list.appendChild(card);
+    });
+  }
+
+  async function generateCustomLesson() {
+    const topic = document.getElementById("ai-topic-input").value.trim() || "Смена на рыбзаводе и общение с супервайзером";
+    const btn = document.getElementById("gen-lesson-btn");
+    btn.disabled = true;
+    btn.innerText = "Генерируем диалог и словарь...";
+    try {
+      const fd = new FormData();
+      fd.append("topic", topic);
+      const data = await apiFetch("/api/lesson/generate", { method: "POST", body: fd });
+      openLesson(data.lesson);
+    } catch (e) {
+      alert("Ошибка генерации: " + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerText = "Сгенерировать AI-урок";
+    }
+  }
+
+  function openLesson(mod) {
+    state.currentLesson = mod;
+    state.audioBlobs["les"] = null;
+    document.getElementById("les-pronunciation-result").innerHTML = "";
+    document.getElementById("les-text-fallback").value = "";
+    document.getElementById("les-rec-status").innerText = "Нажмите «Записать», чтобы проверить дикцию";
+
+    document.getElementById("lesson-tag").innerText = mod.tag;
+    document.getElementById("lesson-title").innerText = mod.title;
+    document.getElementById("lesson-desc").innerText = mod.description;
+    document.getElementById("speaking-target").innerText = mod.speaking_prompt;
+
+    // Render Tap-to-Translate Dialogue
+    const dlgBox = document.getElementById("lesson-dialogue");
+    dlgBox.innerHTML = "";
+    mod.dialogue.forEach(line => {
+      const div = document.createElement("div");
+      div.className = "dialogue-line" + (line.speaker === "You" ? " you" : "");
+      const fullEn = line.tokens.map(t => t[0]).join(" ");
+
+      const topRow = document.createElement("div");
+      topRow.className = "speaker-row";
+      topRow.innerHTML = `<span>${line.speaker}</span>`;
+      const spkBtn = document.createElement("span");
+      spkBtn.style.cursor = "pointer";
+      spkBtn.innerText = "🔊 Озвучить фразу";
+      spkBtn.onclick = () => speakText(fullEn);
+      topRow.appendChild(spkBtn);
+      div.appendChild(topRow);
+
+      const wordsWrap = document.createElement("div");
+      line.tokens.forEach(([en, ru]) => {
+        const span = document.createElement("span");
+        span.className = "word-token";
+        span.innerText = en;
+        span.onclick = () => {
+          document.querySelectorAll(".word-token").forEach(el => el.classList.remove("active"));
+          span.classList.add("active");
+          showTranslation(en.replace(/[.,!?"]/g, ""), ru);
+        };
+        wordsWrap.appendChild(span);
+      });
+      div.appendChild(wordsWrap);
+      dlgBox.appendChild(div);
+    });
+
+    // Setup Sentence Builder
+    document.getElementById("builder-ru-prompt").innerText = "Переведите: «" + mod.builder.ru + "»";
+    document.getElementById("builder-feedback").innerText = "";
+    state.lessonBuilderSelected = [];
+    state.lessonBuilderPool = [...mod.builder.words].sort(() => Math.random() - 0.5);
+    renderLessonBuilder();
+
+    showTab("lesson");
+  }
+
+  function showTranslation(en, ru) {
+    document.getElementById("tr-en-word").innerText = en;
+    document.getElementById("tr-ru-word").innerText = ru;
+    document.getElementById("translation-bar").style.display = "flex";
+  }
+
+  function closeTranslation() {
+    document.getElementById("translation-bar").style.display = "none";
+    document.querySelectorAll(".word-token").forEach(el => el.classList.remove("active"));
+  }
+
+  function renderLessonBuilder() {
+    const ansBox = document.getElementById("builder-answer-box");
+    const poolBox = document.getElementById("builder-pool-box");
+    ansBox.innerHTML = "";
+    poolBox.innerHTML = "";
+
+    state.lessonBuilderSelected.forEach((w, idx) => {
+      const tile = document.createElement("span");
+      tile.className = "word-tile";
+      tile.innerText = w;
+      tile.onclick = () => {
+        state.lessonBuilderSelected.splice(idx, 1);
+        state.lessonBuilderPool.push(w);
+        renderLessonBuilder();
+      };
+      ansBox.appendChild(tile);
+    });
+
+    state.lessonBuilderPool.forEach((w, idx) => {
+      const tile = document.createElement("span");
+      tile.className = "word-tile";
+      tile.innerText = w;
+      tile.onclick = () => {
+        state.lessonBuilderPool.splice(idx, 1);
+        state.lessonBuilderSelected.push(w);
+        renderLessonBuilder();
+      };
+      poolBox.appendChild(tile);
+    });
+  }
+
+  function resetBuilder() {
+    state.lessonBuilderSelected = [];
+    state.lessonBuilderPool = [...state.currentLesson.builder.words].sort(() => Math.random() - 0.5);
+    document.getElementById("builder-feedback").innerText = "";
+    renderLessonBuilder();
+  }
+
+  function checkBuilder() {
+    const userStr = state.lessonBuilderSelected.join(" ");
+    const fb = document.getElementById("builder-feedback");
+    if (userStr === state.currentLesson.builder.answer) {
+      fb.style.color = "#34d399";
+      fb.innerText = "✅ Отлично! Предложение собрано абсолютно верно.";
+    } else {
+      fb.style.color = "#f87171";
+      fb.innerText = "❌ Есть неточность в порядке слов. Попробуй еще раз!";
+    }
+  }
+
+  async function submitPronunciation() {
+    const audioBlob = state.audioBlobs["les"];
+    const textAttempt = document.getElementById("les-text-fallback").value.trim();
+    if (!audioBlob && !textAttempt) {
+      alert("Сначала запишите фразу на микрофон или введите текстом.");
+      return;
+    }
+    const btn = document.getElementById("les-check-btn");
+    btn.disabled = true;
+    btn.innerText = "Проверяем...";
+    try {
+      const fd = new FormData();
+      fd.append("target_phrase", state.currentLesson.speaking_prompt);
+      fd.append("text_attempt", textAttempt);
+      if (audioBlob) fd.append("audio", audioBlob, "practice.webm");
+
+      const res = await apiFetch("/api/pronunciation", { method: "POST", body: fd });
+      document.getElementById("les-pronunciation-result").innerHTML = `
+        <div style="background:var(--card-2); padding:10px; border-radius:10px;">
+          <div><strong>Оценка дикции:</strong> <span style="color:var(--gold)">${res.score}/100</span></div>
+          <div style="color:var(--muted); margin:4px 0;"><strong>Распознано:</strong> "${res.transcript}"</div>
+          <div>${res.diction_tips}</div>
+        </div>
+      `;
+    } catch (e) {
+      alert("Ошибка: " + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerText = "Проверить речь";
+    }
+  }
+
+  async function finishCurrentLesson() {
+    try {
+      const fd = new FormData();
+      fd.append("module_id", state.currentLesson.id);
+      const data = await apiFetch("/api/lesson/complete", { method: "POST", body: fd });
+      state.user = data.user;
+      state.leaderboard = data.leaderboard;
+      renderModules();
+      renderLeaderboard();
+      showTab("courses");
+    } catch (e) {
+      alert("Ошибка: " + e.message);
+    }
+  }
+
+  // --- INTERVIEW 3 + 3 ---
+  function startInterview() {
+    state.interviewIdx = 0;
+    state.interviewAnswers = {};
+    document.getElementById("interview-intro").classList.add("hidden");
+    document.getElementById("interview-result").classList.add("hidden");
+    document.getElementById("interview-active").classList.remove("hidden");
+    renderInterviewStep();
+  }
+
+  function renderInterviewStep() {
+    const q = state.interviewQuestions[state.interviewIdx];
+    state.audioBlobs["int"] = null;
+    document.getElementById("int-role-badge").innerText = q.role;
+    document.getElementById("int-progress").innerText = `Вопрос ${state.interviewIdx + 1} из ${state.interviewQuestions.length}`;
+    document.getElementById("int-question-text").innerText = q.question;
+    document.getElementById("int-hint-ru").innerText = "💡 Подсказка: " + q.hint_ru;
+    document.getElementById("int-text-input").value = "";
+    document.getElementById("int-rec-status").innerText = "Запишите голосовой ответ на английском";
+    document.getElementById("int-clear-btn").classList.add("hidden");
+
+    const nextBtn = document.getElementById("int-next-btn");
+    nextBtn.innerText = state.interviewIdx === state.interviewQuestions.length - 1
+      ? "🏁 Завершить и узнать балл (из 10 000)"
+      : "Следующий вопрос →";
+  }
+
+  async function nextInterviewStep() {
+    const q = state.interviewQuestions[state.interviewIdx];
+    const txt = document.getElementById("int-text-input").value.trim();
+    const blob = state.audioBlobs["int"] || null;
+
+    if (!txt && !blob) {
+      alert("Ответьте на вопрос голосом или текстом перед переходом дальше.");
+      return;
+    }
+
+    state.interviewAnswers[q.id] = { text: txt, blob: blob };
+
+    if (state.interviewIdx < state.interviewQuestions.length - 1) {
+      state.interviewIdx++;
+      renderInterviewStep();
+    } else {
+      await submitFullInterview();
+    }
+  }
+
+  async function submitFullInterview() {
+    const btn = document.getElementById("int-next-btn");
+    btn.disabled = true;
+    btn.innerText = "Консул и работодатель оценивают ответы...";
+
+    try {
+      const fd = new FormData();
+      const payload = state.interviewQuestions.map(q => {
+        const ans = state.interviewAnswers[q.id] || { text: "", blob: null };
+        if (ans.blob) fd.append(`audio_${q.id}`, ans.blob, `${q.id}.webm`);
+        return {
+          id: q.id,
+          role: q.role,
+          question: q.question,
+          text: ans.text,
+          has_audio: Boolean(ans.blob)
+        };
+      });
+      fd.append("answers_json", JSON.stringify(payload));
+
+      const data = await apiFetch("/api/interview/submit", { method: "POST", body: fd });
+      state.user = data.user;
+      state.leaderboard = data.leaderboard;
+      updateTopBar();
+      renderLeaderboard();
+
+      const ev = data.evaluation;
+      document.getElementById("interview-active").classList.add("hidden");
+      const resBox = document.getElementById("interview-result");
+      resBox.classList.remove("hidden");
+
+      let breakdownHtml = (ev.breakdown || []).map(b => `
+        <div class="card" style="background:var(--card-2);">
+          <div style="font-weight:700; color:#60a5fa; margin-bottom:4px;">Вопрос #${b.question_num}</div>
+          <div style="font-size:13px; color:var(--muted); margin-bottom:6px;"><strong>Ваш ответ:</strong> ${b.what_you_said}</div>
+          <div style="font-size:13px; margin-bottom:6px;"><strong>Разбор:</strong> ${b.critique}</div>
+          <div style="font-size:13px; color:#34d399;"><strong>Идеально:</strong> "${b.ideal_answer}"</div>
+        </div>
+      `).join("");
+
+      resBox.innerHTML = `
+        <div class="card" style="text-align:center;">
+          <span class="badge gold">${ev.verdict}</span>
+          <div class="score-big">${ev.total_score} / 10 000</div>
+          <div style="display:flex; justify-content:space-around; font-size:12px; color:var(--muted); margin-bottom:10px;">
+            <span>Дикция: <strong>${ev.diction_score}%</strong></span>
+            <span>Грамматика: <strong>${ev.grammar_score}%</strong></span>
+            <span>Виза-безопасность: <strong>${ev.visa_safety_score}%</strong></span>
+          </div>
+          <p style="color:#fff;">${ev.summary}</p>
+          <button class="btn" onclick="startInterview()">Пройти интервью заново</button>
+        </div>
+        ${breakdownHtml}
+      `;
+    } catch (e) {
+      alert("Ошибка оценки интервью: " + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // --- LEADERBOARD ---
+  function renderLeaderboard() {
+    const list = document.getElementById("leaderboard-list");
+    list.innerHTML = "";
+    const medals = ["🥇", "🥈", "🥉"];
+
+    state.leaderboard.forEach((item, idx) => {
+      const rank = medals[idx] || `#${idx + 1}`;
+      const row = document.createElement("div");
+      row.className = "dialogue-line";
+      row.style.display = "flex";
+      row.style.justifyContent = "space-between";
+      row.style.alignItems = "center";
+      row.innerHTML = `
+        <div>
+          <div style="font-weight:700; font-size:15px;">${rank} ${item.full_name}</div>
+          <div style="font-size:12px; color:var(--muted);">
+            Уровень: <strong>${item.level || "Нет"}</strong> · Уроков: ${item.lessons_count}
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:18px; font-weight:800; color:var(--gold);">${item.best_interview_score}</div>
+          <div style="font-size:11px; color:var(--muted);">из 10 000</div>
+        </div>
+      `;
+      list.appendChild(row);
+    });
+  }
+
+  initApp();
+</script>
+</body>
+</html>
