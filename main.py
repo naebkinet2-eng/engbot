@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import parse_qsl
 
+import edge_tts
 import uvicorn
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
@@ -18,8 +19,8 @@ from aiogram.types import (
     WebAppInfo,
 )
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
@@ -35,6 +36,9 @@ DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+# Кэш озвучки в памяти, чтобы повторные нажатия работали мгновенно
+_TTS_CACHE: dict[str, bytes] = {}
 
 
 # --- Telegram Bot Handlers ---
@@ -150,13 +154,47 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+    )
+
+
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def serve_webapp():
     return FileResponse(BASE_DIR / "static" / "index.html")
+
+
+@app.api_route("/health", methods=["GET", "HEAD"])
+async def health_check():
+    return {"status": "ok"}
+
+
+@app.get("/api/tts")
+async def api_tts(text: str = Query(..., min_length=1, max_length=400)):
+    clean_text = text.strip()
+    if clean_text in _TTS_CACHE:
+        return Response(content=_TTS_CACHE[clean_text], media_type="audio/mpeg")
+
+    communicate = edge_tts.Communicate(clean_text, voice="en-US-GuyNeural", rate="-5%")
+    audio_chunks = bytearray()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_chunks.extend(chunk["data"])
+
+    mp3_bytes = bytes(audio_chunks)
+    if len(_TTS_CACHE) > 150:
+        _TTS_CACHE.clear()
+    _TTS_CACHE[clean_text] = mp3_bytes
+    return Response(content=mp3_bytes, media_type="audio/mpeg")
 
 
 @app.get("/api/bootstrap")
@@ -167,9 +205,17 @@ async def api_bootstrap(x_telegram_init_data: str = Header(default="")):
         "user": user,
         "audition_questions": curriculum.AUDITION_QUESTIONS,
         "modules": curriculum.MODULES,
-        "interview_questions": curriculum.INTERVIEW_QUESTIONS,
+        "interview_questions": curriculum.get_random_interview_set(),
         "leaderboard": leaderboard,
     }
+
+
+@app.get("/api/interview/new")
+async def api_new_interview(x_telegram_init_data: str = Header(default="")):
+    user = await get_current_tg_user(x_telegram_init_data)
+    level = user.get("level") or "Worker"
+    questions = await ai_service.generate_random_interview(level=level)
+    return {"questions": questions}
 
 
 @app.post("/api/audition")
