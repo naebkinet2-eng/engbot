@@ -225,7 +225,7 @@ async def generate_dynamic_lesson(level: str, topic: str) -> dict:
 
     ОБЯЗАТЕЛЬНО разбей каждую английскую реплику в диалоге на массив пар ["английское_слово_со_знаком_препинания", "точный_контекстный_перевод_на_русский"], чтобы пользователь мог нажать на ЛЮБОЕ слово и увидеть перевод.
 
-    Верни СТРОГО JSON следующей структуры:
+    Верни СТРОГО JSON следующей структуры без вложенных оберток:
     {{
       "id": "ai_custom",
       "title": "Короткое название урока на русском",
@@ -239,10 +239,6 @@ async def generate_dynamic_lesson(level: str, topic: str) -> dict:
         {{
           "speaker": "You",
           "tokens": [["Understood,", "Понял,"], ["boss.", "босс."]]
-        }},
-        {{
-          "speaker": "Supervisor",
-          "tokens": [["Good", "Отличная"], ["job.", "работа."]]
         }}
       ],
       "builder": {{
@@ -254,7 +250,56 @@ async def generate_dynamic_lesson(level: str, topic: str) -> dict:
     }}
     """
 
-    return await _generate_json_smart(prompt, temperature=0.7)
+    raw = await _generate_json_smart(prompt, temperature=0.7)
+    if isinstance(raw, dict) and "lesson" in raw and isinstance(raw["lesson"], dict):
+        raw = raw["lesson"]
+
+    dialogue = raw.get("dialogue") if isinstance(raw.get("dialogue"), list) else []
+    normalized_dialogue = []
+    for line in dialogue:
+        if not isinstance(line, dict):
+            continue
+        speaker = str(line.get("speaker") or "Supervisor")
+        tokens = line.get("tokens")
+        if isinstance(tokens, list) and tokens:
+            clean_tokens = [
+                [str(t[0]), str(t[1])] if isinstance(t, (list, tuple)) and len(t) >= 2 else [str(t), ""]
+                for t in tokens
+            ]
+        else:
+            text = str(line.get("text") or line.get("en") or "Ready to work.")
+            clean_tokens = [[w, ""] for w in text.split()]
+        normalized_dialogue.append({"speaker": speaker, "tokens": clean_tokens})
+
+    if not normalized_dialogue:
+        normalized_dialogue = [
+            {
+                "speaker": "Supervisor",
+                "tokens": [["Please", "Пожалуйста,"], ["check", "проверь"], ["the", "эту"], ["line.", "линию."]],
+            },
+            {
+                "speaker": "You",
+                "tokens": [["Got", "Понял"], ["it,", "вас,"], ["right", "прямо"], ["away.", "сейчас."]],
+            },
+        ]
+
+    builder = raw.get("builder") if isinstance(raw.get("builder"), dict) else {}
+    answer_str = str(builder.get("answer") or "I am ready to start my shift now.").strip()
+    words_list = builder.get("words") if isinstance(builder.get("words"), list) and builder.get("words") else answer_str.split()
+
+    return {
+        "id": str(raw.get("id") or "ai_custom"),
+        "title": str(raw.get("title") or f"Практика: {topic}"),
+        "tag": str(raw.get("tag") or f"AI Practice ({level})"),
+        "description": str(raw.get("description") or f"Ситуация: {topic}"),
+        "dialogue": normalized_dialogue,
+        "builder": {
+            "ru": str(builder.get("ru") or "Я готов начать свою смену прямо сейчас."),
+            "words": [str(w) for w in words_list],
+            "answer": answer_str,
+        },
+        "speaking_prompt": str(raw.get("speaking_prompt") or answer_str),
+    }
 
 
 async def generate_random_interview(level: str = "Worker") -> list[dict]:
