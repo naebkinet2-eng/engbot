@@ -1,14 +1,34 @@
 import json
-import aiosqlite
+import os
+import asyncpg
 
-DB_PATH = "bot_data.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+_pool: asyncpg.Pool | None = None
+
+
+async def get_pool() -> asyncpg.Pool:
+    global _pool
+    if _pool is None:
+        if not DATABASE_URL:
+            raise RuntimeError("Не задана переменная окружения DATABASE_URL!")
+        dsn = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        _pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=5)
+    return _pool
+
+
+async def close_db() -> None:
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
 
 
 async def init_db() -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
+                user_id BIGINT PRIMARY KEY,
                 username TEXT,
                 full_name TEXT,
                 level TEXT DEFAULT NULL,
@@ -18,34 +38,32 @@ async def init_db() -> None:
                 last_interview_verdict TEXT DEFAULT '',
                 lessons_completed TEXT DEFAULT '[]',
                 words_practiced INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        await db.commit()
 
 
 async def get_or_create_user(user_id: int, username: str = "", full_name: str = "") -> dict:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-        row = await cursor.fetchone()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
         if row is None:
-            await db.execute(
-                "INSERT INTO users (user_id, username, full_name) VALUES (?, ?, ?)",
-                (user_id, username or "", full_name or f"User {user_id}"),
+            await conn.execute(
+                "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3)",
+                user_id,
+                username or "",
+                full_name or f"User {user_id}",
             )
-            await db.commit()
-            cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-            row = await cursor.fetchone()
+            row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
         else:
             if (username and row["username"] != username) or (full_name and row["full_name"] != full_name):
-                await db.execute(
-                    "UPDATE users SET username = ?, full_name = ? WHERE user_id = ?",
-                    (username or row["username"], full_name or row["full_name"], user_id),
+                await conn.execute(
+                    "UPDATE users SET username = $1, full_name = $2 WHERE user_id = $3",
+                    username or row["username"],
+                    full_name or row["full_name"],
+                    user_id,
                 )
-                await db.commit()
-                cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-                row = await cursor.fetchone()
+                row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
 
         data = dict(row)
         data["lessons_completed"] = json.loads(data["lessons_completed"] or "[]")
@@ -53,16 +71,19 @@ async def get_or_create_user(user_id: int, username: str = "", full_name: str = 
 
 
 async def save_audition_result(user_id: int, level: str, score: int, feedback: str) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
             """
             UPDATE users
-            SET level = ?, audition_score = ?, audition_feedback = ?
-            WHERE user_id = ?
+            SET level = $1, audition_score = $2, audition_feedback = $3
+            WHERE user_id = $4
             """,
-            (level, score, feedback, user_id),
+            level,
+            score,
+            feedback,
+            user_id,
         )
-        await db.commit()
 
 
 async def complete_lesson(user_id: int, module_id: str, new_words: int = 8) -> dict:
@@ -71,46 +92,50 @@ async def complete_lesson(user_id: int, module_id: str, new_words: int = 8) -> d
     completed.add(module_id)
     updated_words = user["words_practiced"] + new_words
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
             """
             UPDATE users
-            SET lessons_completed = ?, words_practiced = ?
-            WHERE user_id = ?
+            SET lessons_completed = $1, words_practiced = $2
+            WHERE user_id = $3
             """,
-            (json.dumps(list(completed)), updated_words, user_id),
+            json.dumps(list(completed)),
+            updated_words,
+            user_id,
         )
-        await db.commit()
     return await get_or_create_user(user_id)
 
 
 async def save_interview_result(user_id: int, score: int, verdict: str) -> dict:
     user = await get_or_create_user(user_id)
     best = max(user["best_interview_score"], score)
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
             """
             UPDATE users
-            SET best_interview_score = ?, last_interview_verdict = ?
-            WHERE user_id = ?
+            SET best_interview_score = $1, last_interview_verdict = $2
+            WHERE user_id = $3
             """,
-            (best, verdict, user_id),
+            best,
+            verdict,
+            user_id,
         )
-        await db.commit()
     return await get_or_create_user(user_id)
 
 
 async def get_leaderboard() -> list[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
             SELECT user_id, username, full_name, level, best_interview_score,
                    last_interview_verdict, lessons_completed, words_practiced
             FROM users
             ORDER BY best_interview_score DESC, words_practiced DESC
             LIMIT 20
         """)
-        rows = await cursor.fetchall()
         result = []
         for r in rows:
             item = dict(r)
