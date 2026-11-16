@@ -7,14 +7,8 @@ from google.genai import types
 import curriculum
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-
-FALLBACK_MODELS = list(dict.fromkeys([
-    PRIMARY_MODEL,
-    "gemini-3.8-flash-lite",
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-]))
+PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+EXTRA_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "").strip()
 
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
@@ -35,12 +29,16 @@ def _normalize_audio_mime(mime: str | None) -> str:
     return base
 
 
-async def _generate_json_with_fallback(contents: list, temperature: float = 0.3, timeout: float = 22.0) -> dict:
+async def _generate_json_with_fallback(contents: list, temperature: float = 0.3, timeout: float = 16.0) -> dict:
     if not client:
         raise RuntimeError("GEMINI_API_KEY не настроен в переменных окружения Render")
 
+    models_to_try = [PRIMARY_MODEL, PRIMARY_MODEL, PRIMARY_MODEL]
+    if EXTRA_FALLBACK_MODEL and EXTRA_FALLBACK_MODEL != PRIMARY_MODEL:
+        models_to_try.append(EXTRA_FALLBACK_MODEL)
+
     last_error: Exception | None = None
-    for idx, model_name in enumerate(FALLBACK_MODELS):
+    for attempt, model_name in enumerate(models_to_try):
         try:
             response = await asyncio.wait_for(
                 client.aio.models.generate_content(
@@ -57,15 +55,13 @@ async def _generate_json_with_fallback(contents: list, temperature: float = 0.3,
         except Exception as exc:
             last_error = exc
             err_str = str(exc)
-            print(f"[Gemini Fallback] Model '{model_name}' failed: {err_str[:180]}")
-            # Если модель перегружена (503), исчерпан лимит (429), не найдена (404) или таймаут — пробуем следующую
-            if idx < len(FALLBACK_MODELS) - 1:
-                await asyncio.sleep(0.8)
-                continue
+            print(f"[Gemini Retry {attempt + 1}/{len(models_to_try)}] Model '{model_name}' failed: {err_str[:200]}")
+            if attempt < len(models_to_try) - 1:
+                await asyncio.sleep(1.5 * (attempt + 1))
 
     raise RuntimeError(
-        f"Серверы Google Gemini временно перегружены (503). Ваши ответы сохранены — нажмите кнопку отправки еще раз через пару секунд. ({last_error})"
-    )
+        "Серверы Google Gemini сейчас временно перегружены (503). Ваши ответы сохранены — подождите 5 секунд и нажмите кнопку отправки ещё раз."
+    ) from last_error
 
 
 async def evaluate_audition(
@@ -195,11 +191,6 @@ async def generate_dynamic_lesson(level: str, topic: str) -> dict:
 
 
 async def generate_random_interview(level: str = "Worker") -> list[dict]:
-    """
-    Берет случайные 2+2 из богатого пула (24 вопроса с пословным переводом)
-    и добавляет 1+1 уникальных свежих вопроса от AI (если Gemini доступен),
-    либо возвращает 3+3 из пула при высокой нагрузке.
-    """
     base_questions = curriculum.get_random_interview_set()
     if not client:
         return base_questions
@@ -289,4 +280,4 @@ async def evaluate_full_interview(answers_payload: list[dict], audio_files: dict
             contents.append(f"Аудиоответ на вопрос {qid}:")
             contents.append(types.Part.from_bytes(data=raw_bytes, mime_type=clean_mime))
 
-    return await _generate_json_with_fallback(contents, temperature=0.3, timeout=35.0)
+    return await _generate_json_with_fallback(contents, temperature=0.3, timeout=18.0)
