@@ -19,7 +19,7 @@ from aiogram.types import (
 )
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
@@ -49,21 +49,21 @@ async def cmd_start(message: Message) -> None:
         )
 
     if not WEBAPP_URL:
-        await message.answer("⚠️ Ошибка конфигурации: не указан WEBAPP_URL в .env")
+        await message.answer("⚠️ Ошибка конфигурации: не указан WEBAPP_URL в настройках сервера")
         return
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🇺🇸 Открыть H-2B / Seafood English App",
+                    text="🇺🇸 Открыть galosha eng",
                     web_app=WebAppInfo(url=WEBAPP_URL),
                 )
             ]
         ]
     )
     await message.answer(
-        "Привет! Это ваш закрытый тренажер английского для работы в США (визы H-2B / H-2A, рыбзавод, граница и посольство).\n\n"
+        "Привет! Добро пожаловать в **galosha eng** — ваш закрытый тренажер английского для работы в США (визы H-2B / H-2A, рыбзавод, граница и посольство).\n\n"
         "Внутри тебя ждет:\n"
         "1️⃣ **Audition** — входная проверка уровня и дикции\n"
         "2️⃣ **Интерактивный курс** — нажимай на любое слово для мгновенного перевода + тренировка произношения голосом\n"
@@ -81,7 +81,7 @@ async def cmd_top(message: Message) -> None:
         await message.answer("Рейтинг пока пуст.")
         return
 
-    lines = ["🏆 **Рейтинг кандидатов (макс. 10 000 баллов):**\n"]
+    lines = ["🏆 **Рейтинг galosha eng (макс. 10 000 баллов):**\n"]
     medals = ["🥇", "🥈", "🥉"]
     for idx, item in enumerate(leaders):
         prefix = medals[idx] if idx < 3 else f"{idx + 1}."
@@ -135,7 +135,7 @@ async def lifespan(app: FastAPI):
         try:
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(
-                    text="English H-2B",
+                    text="galosha eng",
                     web_app=WebAppInfo(url=WEBAPP_URL),
                 )
             )
@@ -146,6 +146,7 @@ async def lifespan(app: FastAPI):
     yield
     polling_task.cancel()
     await bot.session.close()
+    await database.close_db()
 
 
 app = FastAPI(lifespan=lifespan)
