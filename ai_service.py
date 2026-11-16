@@ -1,11 +1,20 @@
+import asyncio
 import json
 import os
 import re
 from google import genai
 from google.genai import types
+import curriculum
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
+FALLBACK_MODELS = list(dict.fromkeys([
+    PRIMARY_MODEL,
+    "gemini-3.8-flash-lite",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+]))
 
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
@@ -15,6 +24,48 @@ def _parse_json(raw_text: str) -> dict:
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
     cleaned = re.sub(r"\s*```$", "", cleaned)
     return json.loads(cleaned)
+
+
+def _normalize_audio_mime(mime: str | None) -> str:
+    if not mime:
+        return "audio/webm"
+    base = mime.split(";")[0].strip().lower()
+    if not base.startswith("audio/"):
+        return "audio/webm"
+    return base
+
+
+async def _generate_json_with_fallback(contents: list, temperature: float = 0.3, timeout: float = 22.0) -> dict:
+    if not client:
+        raise RuntimeError("GEMINI_API_KEY не настроен в переменных окружения Render")
+
+    last_error: Exception | None = None
+    for idx, model_name in enumerate(FALLBACK_MODELS):
+        try:
+            response = await asyncio.wait_for(
+                client.aio.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=temperature,
+                    ),
+                ),
+                timeout=timeout,
+            )
+            return _parse_json(response.text)
+        except Exception as exc:
+            last_error = exc
+            err_str = str(exc)
+            print(f"[Gemini Fallback] Model '{model_name}' failed: {err_str[:180]}")
+            # Если модель перегружена (503), исчерпан лимит (429), не найдена (404) или таймаут — пробуем следующую
+            if idx < len(FALLBACK_MODELS) - 1:
+                await asyncio.sleep(0.8)
+                continue
+
+    raise RuntimeError(
+        f"Серверы Google Gemini временно перегружены (503). Ваши ответы сохранены — нажмите кнопку отправки еще раз через пару секунд. ({last_error})"
+    )
 
 
 async def evaluate_audition(
@@ -56,18 +107,10 @@ async def evaluate_audition(
 
     contents: list = [prompt]
     if audio_bytes:
-        clean_mime = audio_mime.split(";")[0] if audio_mime else "audio/webm"
+        clean_mime = _normalize_audio_mime(audio_mime)
         contents.append(types.Part.from_bytes(data=audio_bytes, mime_type=clean_mime))
 
-    response = await client.aio.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.3,
-        ),
-    )
-    return _parse_json(response.text)
+    return await _generate_json_with_fallback(contents, temperature=0.3)
 
 
 async def evaluate_pronunciation(
@@ -105,24 +148,13 @@ async def evaluate_pronunciation(
 
     contents: list = [prompt]
     if audio_bytes:
-        clean_mime = audio_mime.split(";")[0] if audio_mime else "audio/webm"
+        clean_mime = _normalize_audio_mime(audio_mime)
         contents.append(types.Part.from_bytes(data=audio_bytes, mime_type=clean_mime))
 
-    response = await client.aio.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.3,
-        ),
-    )
-    return _parse_json(response.text)
+    return await _generate_json_with_fallback(contents, temperature=0.3)
 
 
 async def generate_dynamic_lesson(level: str, topic: str) -> dict:
-    if not client:
-        raise RuntimeError("GEMINI_API_KEY не настроен в .env")
-
     prompt = f"""
     Сгенерируй мини-урок английского языка для подготовки к работе в США по визе H-2B / H-2A (рыбзавод, производство, быт в США).
     Уровень студента: {level} (Novice = простые фразы, Worker = рабочий разговорный, Pro = сложные ситуации и идиомы).
@@ -159,33 +191,57 @@ async def generate_dynamic_lesson(level: str, topic: str) -> dict:
     }}
     """
 
-    response = await client.aio.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=[prompt],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.7,
-        ),
-    )
-    return _parse_json(response.text)
+    return await _generate_json_with_fallback([prompt], temperature=0.7)
+
+
+async def generate_random_interview(level: str = "Worker") -> list[dict]:
+    """
+    Берет случайные 2+2 из богатого пула (24 вопроса с пословным переводом)
+    и добавляет 1+1 уникальных свежих вопроса от AI (если Gemini доступен),
+    либо возвращает 3+3 из пула при высокой нагрузке.
+    """
+    base_questions = curriculum.get_random_interview_set()
+    if not client:
+        return base_questions
+
+    prompt = f"""
+    Сгенерируй 2 уникальных вопроса для собеседования на сезонную работу в США (виза H-2B / рыбзавод) под уровень {level}:
+    - 1 вопрос от лица "Consular Officer (Посольство США)"
+    - 1 вопрос от лица "US Plant Supervisor (Работодатель, США)"
+
+    Разбей каждый вопрос на массив пар tokens: [["English", "Русский"], ...] для пословного перевода при нажатии.
+    Верни СТРОГО JSON:
+    {{
+      "questions": [
+        {{
+          "id": "ai_con_1",
+          "role": "Consular Officer (Посольство США)",
+          "question": "Полный вопрос на английском?",
+          "tokens": [["Full", "Полный"], ["question?", "вопрос?"]],
+          "hint_ru": "Краткая подсказка на русском как ответить правильно"
+        }},
+        {{
+          "id": "ai_emp_1",
+          "role": "US Plant Supervisor (Работодатель, США)",
+          "question": "Полный рабочий вопрос на английском?",
+          "tokens": [["Full", "Полный"], ["work", "рабочий"], ["question?", "вопрос?"]],
+          "hint_ru": "Краткая подсказка на русском"
+        }}
+      ]
+    }}
+    """
+    try:
+        data = await _generate_json_with_fallback([prompt], temperature=0.8, timeout=10.0)
+        ai_qs = data.get("questions", [])
+        if len(ai_qs) == 2 and all("tokens" in q and "question" in q for q in ai_qs):
+            return [base_questions[0], base_questions[1], ai_qs[0], base_questions[3], base_questions[4], ai_qs[1]]
+    except Exception:
+        pass
+
+    return base_questions
 
 
 async def evaluate_full_interview(answers_payload: list[dict], audio_files: dict[str, tuple[bytes, str]]) -> dict:
-    """
-    answers_payload: [{"id": "int_1", "role": "...", "question": "...", "text": "...", "has_audio": bool}, ...]
-    audio_files: {"int_1": (bytes, mime_type), ...}
-    """
-    if not client:
-        return {
-            "total_score": 5000,
-            "verdict": "DEMO MODE",
-            "diction_score": 50,
-            "grammar_score": 50,
-            "visa_safety_score": 50,
-            "summary": "Укажите GEMINI_API_KEY в .env для реальной оценки собеседования.",
-            "breakdown": []
-        }
-
     voice_count = len(audio_files)
     max_cap = 10000 if voice_count >= 4 else (9000 if voice_count >= 1 else 8200)
 
@@ -229,16 +285,8 @@ async def evaluate_full_interview(answers_payload: list[dict], audio_files: dict
         qid = item["id"]
         if qid in audio_files:
             raw_bytes, mime = audio_files[qid]
-            clean_mime = mime.split(";")[0] if mime else "audio/webm"
+            clean_mime = _normalize_audio_mime(mime)
             contents.append(f"Аудиоответ на вопрос {qid}:")
             contents.append(types.Part.from_bytes(data=raw_bytes, mime_type=clean_mime))
 
-    response = await client.aio.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.3,
-        ),
-    )
-    return _parse_json(response.text)
+    return await _generate_json_with_fallback(contents, temperature=0.3, timeout=35.0)
