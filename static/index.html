@@ -329,7 +329,7 @@
     lessonBuilderSelected: [],
     lessonBuilderPool: [],
     interviewIdx: 0,
-    interviewAnswers: {}, // { qid: { text: "", blob: Blob|null } }
+    interviewAnswers: {},
     recorders: {},
     audioBlobs: {}
   };
@@ -593,29 +593,63 @@
     }
   }
 
+  function renderClickableTokens(container, tokens) {
+    tokens.forEach(pair => {
+      const enWord = Array.isArray(pair) ? String(pair[0] || "") : String(pair);
+      const ruWord = Array.isArray(pair) ? String(pair[1] || "") : "";
+      const span = document.createElement("span");
+      span.className = "word-token";
+      span.innerText = enWord;
+      span.onclick = () => {
+        document.querySelectorAll(".word-token").forEach(el => el.classList.remove("active"));
+        span.classList.add("active");
+        showTranslation(enWord, ruWord || "Перевод недоступен");
+      };
+      container.appendChild(span);
+    });
+  }
+
   function openLesson(mod) {
-    state.currentLesson = mod;
+    if (!mod || typeof mod !== "object") {
+      alert("Не удалось открыть урок: пустой ответ сервера.");
+      return;
+    }
+    const dialogueList = Array.isArray(mod.dialogue) ? mod.dialogue : [];
+    const builderObj = (mod.builder && typeof mod.builder === "object")
+      ? mod.builder
+      : { ru: "Я готов работать.", words: ["I", "am", "ready", "to", "work."], answer: "I am ready to work." };
+    const builderWords = Array.isArray(builderObj.words) && builderObj.words.length
+      ? builderObj.words
+      : String(builderObj.answer || "I am ready.").split(/\s+/);
+
+    state.currentLesson = {
+      ...mod,
+      dialogue: dialogueList,
+      builder: { ...builderObj, words: builderWords },
+      speaking_prompt: mod.speaking_prompt || builderObj.answer || "I am ready to work."
+    };
+
     state.audioBlobs["les"] = null;
     document.getElementById("les-pronunciation-result").innerHTML = "";
     document.getElementById("les-text-fallback").value = "";
     document.getElementById("les-rec-status").innerText = "Нажмите «Записать», чтобы проверить дикцию";
 
-    document.getElementById("lesson-tag").innerText = mod.tag;
-    document.getElementById("lesson-title").innerText = mod.title;
-    document.getElementById("lesson-desc").innerText = mod.description;
-    document.getElementById("speaking-target").innerText = mod.speaking_prompt;
+    document.getElementById("lesson-tag").innerText = state.currentLesson.tag || "Lesson";
+    document.getElementById("lesson-title").innerText = state.currentLesson.title || "Урок";
+    document.getElementById("lesson-desc").innerText = state.currentLesson.description || "";
+    document.getElementById("speaking-target").innerText = state.currentLesson.speaking_prompt;
 
-    // Render Tap-to-Translate Dialogue
     const dlgBox = document.getElementById("lesson-dialogue");
     dlgBox.innerHTML = "";
-    mod.dialogue.forEach(line => {
+    dialogueList.forEach(line => {
       const div = document.createElement("div");
       div.className = "dialogue-line" + (line.speaker === "You" ? " you" : "");
-      const fullEn = line.tokens.map(t => t[0]).join(" ");
+      const tokens = Array.isArray(line.tokens) ? line.tokens : [];
+      const fullEn = tokens.map(t => Array.isArray(t) ? t[0] : String(t)).join(" ");
 
       const topRow = document.createElement("div");
       topRow.className = "speaker-row";
-      topRow.innerHTML = `<span>${line.speaker}</span>`;
+      topRow.innerHTML = `<span>${line.speaker || "Speaker"}</span>`;
       const spkBtn = document.createElement("span");
       spkBtn.style.cursor = "pointer";
       spkBtn.innerText = "🔊 Озвучить фразу";
@@ -624,26 +658,15 @@
       div.appendChild(topRow);
 
       const wordsWrap = document.createElement("div");
-      line.tokens.forEach(([en, ru]) => {
-        const span = document.createElement("span");
-        span.className = "word-token";
-        span.innerText = en;
-        span.onclick = () => {
-          document.querySelectorAll(".word-token").forEach(el => el.classList.remove("active"));
-          span.classList.add("active");
-          showTranslation(en.replace(/[.,!?"]/g, ""), ru);
-        };
-        wordsWrap.appendChild(span);
-      });
+      renderClickableTokens(wordsWrap, tokens);
       div.appendChild(wordsWrap);
       dlgBox.appendChild(div);
     });
 
-    // Setup Sentence Builder
-    document.getElementById("builder-ru-prompt").innerText = "Переведите: «" + mod.builder.ru + "»";
+    document.getElementById("builder-ru-prompt").innerText = "Переведите: «" + (builderObj.ru || "") + "»";
     document.getElementById("builder-feedback").innerText = "";
     state.lessonBuilderSelected = [];
-    state.lessonBuilderPool = [...mod.builder.words].sort(() => Math.random() - 0.5);
+    state.lessonBuilderPool = [...builderWords].sort(() => Math.random() - 0.5);
     renderLessonBuilder();
 
     showTab("lesson");
